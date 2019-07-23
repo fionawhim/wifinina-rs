@@ -1,8 +1,8 @@
 #![no_std]
 
 mod chip_select;
-mod util;
 pub mod commands;
+mod util;
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use embedded_hal::spi::FullDuplex;
@@ -13,8 +13,7 @@ use util::millis::{Milliseconds, U32Ext};
 
 use chip_select::*;
 
-use commands::{socket::SocketStatus, wifi::WifiStatus,};
-
+use commands::{socket::SocketStatus, wifi::WifiStatus};
 
 pub struct WifiNina<CsPin, BusyPin, Spi, CountDown>
 where
