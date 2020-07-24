@@ -9,9 +9,9 @@ use embedded_hal::digital::v2::{InputPin, OutputPin};
 use embedded_hal::spi::FullDuplex;
 use embedded_hal::timer::CountDown;
 
+use crate::commands::*;
 use crate::util::millis::{Milliseconds, U32Ext};
 use crate::{Error, WifiNina};
-use crate::commands::*;
 
 impl<CsPin, BusyPin, Spi, SpiError, CountDown, CountDownTime>
     WifiNina<CsPin, BusyPin, Spi, CountDown>
@@ -24,6 +24,9 @@ where
     CountDown: embedded_hal::timer::CountDown<Time = CountDownTime>,
     CountDownTime: From<Milliseconds>,
 {
+    /// Allocates a socket on the WiFiNINA chip. There are a maximum of 255
+    /// available sockets.
+    ///
     // We return a Socket of a different lifetime because we don’t actually
     // enforce that the Socket value lasts as long as the references to self/spi
     // since it doesn’t ever access them directly.
@@ -121,11 +124,6 @@ where
         Err(Error::SocketConnectionFailed(last_status))
     }
 
-    // Closes the socket.
-    //
-    // Calling "close" again on a closed socket is a no-op (as long as the chip
-    // hasn’t given out the same number again, which is why we loop in here to
-    // prevent code from running that might allocate a new socket).
     pub fn socket_close(
         &mut self,
         spi: &mut Spi,
@@ -227,6 +225,7 @@ where
 //
 // These are refs because the docs for PhantomData say to use refs when there’s
 // not ownership.
+#[derive(Copy, Clone)]
 pub struct Socket<'a, CS, S> {
     cs: core::marker::PhantomData<&'a CS>,
     spi: core::marker::PhantomData<&'a S>,
@@ -324,6 +323,7 @@ where
 {
     spi: &'a mut S,
     wifi: &'a mut WifiNina<CS, B, S, T>,
+    // TODO(fiona): Make this an Option so it can be consumed on close.
     socket: Socket<'a, CS, S>,
 }
 

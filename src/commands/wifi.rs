@@ -113,6 +113,7 @@ where
         Err(Error::ConnectionFailed(last_status))
     }
 
+    /// Starts an access point with the provided name and 802.11ac channel.
     pub fn wifi_create_ap(
         &mut self,
         spi: &mut Spi,

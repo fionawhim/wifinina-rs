@@ -95,7 +95,9 @@ impl Into<u8> for NinaResponse {
 impl<CsPin, BusyPin, Spi, SpiError, CountDown, CountDownTime>
     WifiNina<CsPin, BusyPin, Spi, CountDown>
 where
+    // Pin that the co-processor uses to say if it’s ready.
     BusyPin: InputPin,
+    // Pin we use to tell the chip to listen on the SPI bus.
     CsPin: OutputPin,
     Spi: FullDuplex<u8, Error = SpiError>
         + embedded_hal::blocking::spi::Write<u8, Error = SpiError>
@@ -103,6 +105,8 @@ where
     CountDown: embedded_hal::timer::CountDown<Time = CountDownTime>,
     CountDownTime: From<Milliseconds>,
 {
+    /// Flag added to response commands from the chip. It echoes the command
+    /// that was sent, but with this bit set to 1.
     const REPLY_FLAG: u8 = 1 << 7;
 
     // Static method because it needs to be called while chip_select is mutably
@@ -125,6 +129,9 @@ where
         Err(Error::ResponseTimeout)
     }
 
+    /// Ensures that the next byte from the WiFiNINI chip matches the expected
+    /// character. Used to check that the reply command matches the given
+    /// command, or that the Ack byte is sent.
     fn expect_byte(spi: &mut Spi, target_char: u8) -> Result<(), Error<SpiError>> {
         let v = spi.transfer_byte().map_err(Error::spi)?;
 
@@ -135,6 +142,7 @@ where
         }
     }
 
+    /// Sends a WiFiNINA command to the co-processor.
     fn send_command(
         &mut self,
         spi: &mut Spi,
@@ -144,10 +152,14 @@ where
         let mut spi = self.chip_select.select(spi, &mut self.timer)?;
 
         let cmd_byte: u8 = cmd.into();
+        // We keep track of the number of bytes sent so we can pad out to a
+        // multiple of 4.
         let mut sent_len: usize = 0;
 
         let use_16_bit_length = params.use_16_bit_length();
 
+        // The first part of the header is a "Start" token, the command we’re
+        // sending, and then the number of parameters to the command.
         spi.write(&[
             NinaCommand::Start.into(),
             // Pedantic to mask out the top bit, since none of the commands use it.
@@ -158,6 +170,10 @@ where
 
         sent_len += 3;
 
+        // Helper function to write a length value to the bus. Each parameter
+        // for the command is prefixed by its length, either 1 byte or 2 bytes.
+        // (Some commands explicitly use 2-byte lengths, for sending strings of
+        // data.)
         let mut write_len = |spi: &mut Spi, len: usize| -> Result<(), Error<SpiError>> {
             sent_len += len;
 
@@ -172,6 +188,7 @@ where
             Ok(())
         };
 
+        // Helper function to just write bytes to the bus.
         let write_bytes = |spi: &mut Spi, bytes: &mut dyn Iterator<Item = u8>| {
             spi.write_iter(bytes).map_err(Error::spi)
         };
@@ -180,17 +197,17 @@ where
             match p {
                 SendParam::Byte(b) => {
                     write_len(&mut spi, 1)?;
-                    write_bytes(&mut spi, &mut [*b].into_iter().cloned())?;
+                    write_bytes(&mut spi, &mut [*b].iter().cloned())?;
                 }
 
                 SendParam::Word(w) => {
                     write_len(&mut spi, 2)?;
-                    write_bytes(&mut spi, &mut w.to_be_bytes().into_iter().cloned())?;
+                    write_bytes(&mut spi, &mut w.to_be_bytes().iter().cloned())?;
                 }
 
                 SendParam::LEWord(w) => {
                     write_len(&mut spi, 2)?;
-                    write_bytes(&mut spi, &mut w.to_le_bytes().into_iter().cloned())?;
+                    write_bytes(&mut spi, &mut w.to_le_bytes().iter().cloned())?;
                 }
 
                 SendParam::Bytes(it) => {
@@ -213,6 +230,9 @@ where
         Ok(())
     }
 
+    /// Accepts a response from the WiFiNINA chip. The params structure must be
+    /// set up to match the expected response, as this method will copy values
+    /// into it.
     fn receive_response(
         &mut self,
         spi: &mut Spi,
@@ -255,7 +275,14 @@ where
         let param_count: u8 = spi.transfer_byte().map_err(Error::spi)?;
         let mut param_idx: u8 = 0;
 
+        // We iterate through the provided parameters, filling them in from the
+        // chip’s response stream.
         for param_handler in params {
+            // This handles the case where the chip has told us, through
+            // param_count, a number of response parameters that is fewer than
+            // the number we’re prepared for. We’re ok with that as long as
+            // every param from here to the end is an OptionalByte. Otherwise we
+            // error.
             if param_idx == param_count {
                 match param_handler {
                     RecvParam::OptionalByte(_) => continue,
@@ -327,12 +354,13 @@ where
         }
 
         if param_count > param_idx {
-            return Err(Error::UnexpectedParam(param_idx));
+            return Err(Error::UnexpectedParam(param_count));
         }
 
         Ok(())
     }
 
+    /// Handles both sending and receiving of a single command.
     fn send_and_receive(
         &mut self,
         spi: &mut Spi,
@@ -344,6 +372,8 @@ where
         self.receive_response(spi, command, recv_params)
     }
 
+    /// Puts the chip in debug mode. This causes it to write diagnostic info to
+    /// its UART.
     pub fn set_debug(&mut self, spi: &mut Spi, enabled: bool) -> Result<(), Error<SpiError>> {
         self.send_and_receive(
             spi,
@@ -355,9 +385,14 @@ where
 }
 
 pub enum SendParam<'a> {
+    /// Param is a single byte
     Byte(u8),
+    /// Param is a word, to be sent in big-endian, network order
     Word(u16),
+    /// Param is a word, to be sent in little-endian order
     LEWord(u16),
+    /// Param is of arbitrary length (e.g. string data), though the length must
+    /// be known so we can send it as a prefix
     Bytes(&'a mut dyn ExactSizeIterator<Item = u8>),
 }
 
@@ -373,8 +408,17 @@ pub enum RecvParam<'a> {
     Buffer(&'a mut [u8], &'a mut usize),
 }
 
+/// Structure to hold the set of parameters for both sending a command and
+/// receiving a reply.
+///
+/// TODO(fiona): Should this be separate between Send and Receive, since the
+/// former doesn’t need to be mutable? We might need to duplicate the impls,
+/// though.
 pub struct Params<'a, P> {
+    /// Mutable for the sake of receiving values, since the library won’t
+    /// allocate its own memory for them.
     params: &'a mut [P],
+    /// Set to true if the length needs to be 16 bits instead of 8.
     use_16_bit_length: bool,
 }
 

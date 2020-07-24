@@ -2,7 +2,7 @@
 
 mod chip_select;
 pub mod commands;
-mod util;
+pub mod util;
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use embedded_hal::spi::FullDuplex;
@@ -15,6 +15,23 @@ use chip_select::*;
 
 use commands::{socket::SocketStatus, wifi::WifiStatus};
 
+/// Device interface for the WifiNINA ESP32 wi-fi co-processor found in the
+/// PyPortal, AirLift FeatherWing, and other places.
+///
+/// Device source code: https://github.com/arduino/nina-fw
+///
+/// Adafruit fork: https://github.com/adafruit/nina-fw
+///
+/// CircuitPython ESP32 driver:
+/// https://github.com/adafruit/Adafruit_CircuitPython_ESP32SPI
+///
+/// As of this writing, we don’t distinguish between the Adafruit and Arduino
+/// implementations, since this code is only tested on a PyPortal.
+///
+/// This object consumes the chip select and busy pins for the co-processor.
+/// (esp_cs and esp_busy, respectively). Its methods all take an Spi bus as an
+/// argument. It is the application’s responsibility to ensure that the bus is
+/// not in use by any other devices while the method is executing.
 pub struct WifiNina<CsPin, BusyPin, Spi, CountDown>
 where
     CsPin: OutputPin,
@@ -38,9 +55,12 @@ where
 {
     // const ConnectionDelayMs: u16 = 100;
 
-    // We take the spi here just to allow the type to be implied.
-    //
-    // Also resets the WifiNINA chip.
+    /// Creates a WifiNina instance.
+    ///
+    /// Does not use or save the Spi instance, but takes it so that we can infer
+    /// its type.
+    ///
+    /// Implicitly calls reset.
     pub fn new<ResetPin>(
         _spi: &Spi,
         cs: CsPin,
@@ -63,6 +83,7 @@ where
         Ok(wifi)
     }
 
+    /// Reboots the WifiNINA chip by bringing the reset pin low for 200ms.
     pub fn reset<ResetPin>(&mut self, reset: &mut ResetPin) -> Result<(), Error<SpiError>>
     where
         ResetPin: OutputPin,
@@ -74,6 +95,7 @@ where
 
         reset.set_high().map_err(|_| Error::ResetPinError)?;
 
+        // Give the chip time to start back up.
         self.timer.start(750.ms());
         block!(self.timer.wait()).unwrap();
 
@@ -122,13 +144,5 @@ impl<BE, CE, SE> From<WifiNinaChipSelectError<BE, CE>> for Error<SE> {
             WifiNinaChipSelectError::CsPinError(_) => Error::ChipSelectPinError,
             WifiNinaChipSelectError::DeviceReadyTimeout => Error::ChipSelectTimeout,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
     }
 }

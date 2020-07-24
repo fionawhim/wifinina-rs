@@ -1,11 +1,18 @@
+/// Trait for an object that represents a chip select pin selecting a member of
+/// the bus.
+///
+/// It is expected that a ChipSelect implementation is guarding a bus. If
+/// selection succeeds, it returns a SafeSpi instance that can be used to access
+/// the bus. Once SafeSpi goes out of scope, it will call deselect.
 pub trait ChipSelect {
     type Spi;
 
+    /// Disables the chip selection.
     fn deselect(&mut self);
 }
 
-// A wrapper around an Spi bus that will deselect its ChipSelect when it
-// goes out-of-scope.
+/// A wrapper around an Spi bus and ChipSelect instance that will deselect the
+/// ChipSelect when the wrapper goes out-of-scope.
 pub struct SafeSpi<'a, S, CS>
 where
     CS: ChipSelect<Spi = S>,

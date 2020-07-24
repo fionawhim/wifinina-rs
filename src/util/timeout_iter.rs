@@ -1,5 +1,11 @@
 use embedded_hal::timer::CountDown;
 
+/// Converts a CountDown timer into an iterable object to do busy waits. Calling
+/// next() returns a () value until the timer finishes. Once the timer is done,
+/// the iterator is done and returns None.
+///
+/// Assumes that the timer will raise an nb::Error::WouldBlock before it has
+/// gone off.
 pub struct TimeoutIter<'a, C> {
     timer: &'a mut C,
 }
