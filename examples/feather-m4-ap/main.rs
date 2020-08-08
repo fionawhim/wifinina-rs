@@ -7,24 +7,27 @@ extern crate nb;
 #[allow(unused_imports)]
 use panic_halt;
 
+use embedded_hal::digital::v1_compat::OldOutputPin;
+use hal::timer::SpinTimer;
+
 use core::fmt::Write;
 
-use pyportal as hal;
+use feather_m4 as hal;
 
 use embedded_hal::digital::v2::{StatefulOutputPin, ToggleableOutputPin};
 use hal::clock::GenericClockController;
 use hal::entry;
-use hal::pac::gclk;
 use hal::pac::{CorePeripherals, Peripherals};
+use hal::prelude::*;
 use hal::sercom;
-use hal::{pins::Sets, Pins};
+use hal::Pins;
 
+use wifinina::feather_m4 as feather_m4_wifi;
 use wifinina::http::{HttpMethod, HttpRequestReader};
-use wifinina::pyportal as pyportal_wifi;
 use wifinina::{Error, Protocol};
 
-#[path = "../helpers.rs"]
-mod helpers;
+use smart_leds::{SmartLedsWrite, RGB8};
+use ws2812_timer_delay::Ws2812;
 
 #[entry]
 fn main() -> ! {
@@ -39,51 +42,49 @@ fn main() -> ! {
         &mut peripherals.NVMCTRL,
     );
 
-    let Sets {
-        d13,
-        esp,
-        spi,
-        i2c,
-        mut port,
-        ..
-    } = Pins::new(peripherals.PORT).split();
+    let mut pins = Pins::new(peripherals.PORT);
 
-    let mut led = d13.into_push_pull_output(&mut port);
-
-    let gclk2 = clocks
-        .configure_gclk_divider_and_source(
-            gclk::pchctrl::GEN_A::GCLK2,
-            1,
-            gclk::genctrl::SRC_A::DFLL,
-            false,
-        )
-        .unwrap();
-
-    let mut uart = helpers::stemma_uart(
-        peripherals.SERCOM5,
+    let mut uart = hal::uart(
         &mut clocks,
-        &gclk2,
+        115200u32.hz(),
+        peripherals.SERCOM5,
         &mut peripherals.MCLK,
-        &mut port,
-        i2c.scl,
-        i2c.sda,
+        // NOTE: As of v0.5.0, these are wrong. pins has the wrong types.
+        pins.d1,
+        pins.d0,
+        &mut pins.port,
     );
 
-    write!(&mut uart, "\r\n-- PYPORTAL START!! --\r\n").ok();
+    let neopixel_pin: OldOutputPin<_> = pins.neopixel.into_push_pull_output(&mut pins.port).into();
+    let timer = SpinTimer::new(4);
 
-    let sys_tick = pyportal_wifi::sys_tick(core_peripherals.SYST, &mut clocks);
+    let mut neopixel = Ws2812::new(timer, neopixel_pin);
+
+    write!(&mut uart, "\r\n-- AIRLIFT START!! --\r\n").ok();
+
+    let sys_tick = feather_m4_wifi::sys_tick(core_peripherals.SYST, &mut clocks);
 
     write!(&mut uart, "Making SPI…\r\n").ok();
 
-    let mut spi = pyportal_wifi::spi(
+    let mut spi = feather_m4_wifi::spi(
         &mut clocks,
-        peripherals.SERCOM2,
+        peripherals.SERCOM1,
         &mut peripherals.MCLK,
-        &mut port,
-        spi,
+        &mut pins.port,
+        pins.sck,
+        pins.mosi,
+        pins.miso,
     );
 
-    let (mut wifi, ..) = pyportal_wifi::wifi(&mut port, esp, &spi, &sys_tick).unwrap();
+    let (mut wifi, ..) = feather_m4_wifi::wifi(
+        &mut pins.port,
+        pins.d11,
+        pins.d12,
+        pins.d13,
+        &spi,
+        &sys_tick,
+    )
+    .unwrap();
 
     write!(&mut uart, "Checking firmware version…\r\n").ok();
 
@@ -102,8 +103,8 @@ fn main() -> ! {
         }
     }
 
-    write!(&mut uart, "Creating 'PyPortal' access point…\r\n").ok();
-    wifi.wifi_create_ap(&mut spi, "PyPortal", None, 0).ok();
+    write!(&mut uart, "Creating 'AirLift' access point…\r\n").ok();
+    wifi.wifi_create_ap(&mut spi, "AirLift", None, 0).ok();
 
     let server_socket = wifi
         .server_start(&mut spi, Protocol::Tcp, 80, None)
@@ -120,7 +121,7 @@ fn main() -> ! {
 
     loop {
         let client_socket = block!(wifi.server_select(&mut spi, &server_socket)).unwrap();
-        handle_client(&mut uart, client_socket, &mut led);
+        handle_client(&mut uart, client_socket, &mut neopixel);
     }
 }
 
@@ -129,11 +130,12 @@ fn handle_client<
     // to handle this request / response. (The actual ConnectedSocket type is
     // unfortunately a mess of generics to use.)
     S: genio::Read<ReadError = nb::Error<Error<sercom::Error>>> + core::fmt::Write,
-    P: StatefulOutputPin + ToggleableOutputPin,
+    P: SmartLedsWrite<Color = C>,
+    C: core::convert::From<[u8; 3]>,
 >(
     uart: &mut dyn core::fmt::Write,
     client_socket: S,
-    led: &mut P,
+    neopixel: &mut P,
 ) {
     let mut request_reader = HttpRequestReader::from_read(client_socket);
 
@@ -143,11 +145,11 @@ fn handle_client<
 
             if head.path == "/" {
                 match head.method {
-                    HttpMethod::Get => handle_page(&mut request_reader.free(), led),
+                    HttpMethod::Get => handle_page(&mut request_reader.free()),
                     HttpMethod::Post => {
                         // We get a POST when the user presses the
                         // toggle button.
-                        led.toggle().ok();
+                        neopixel.write([[0u8, 20u8, 30u8]].iter().cloned()).ok();
                         handle_redirect(&mut request_reader.free(), "/");
                     }
                     _ => {
@@ -164,7 +166,7 @@ fn handle_client<
     }
 }
 
-fn handle_page<W: core::fmt::Write, P: StatefulOutputPin>(writer: &mut W, pin: &mut P) {
+fn handle_page<W: core::fmt::Write>(writer: &mut W) {
     write!(writer, "HTTP/1.1 200 OK\r\n").ok();
     write!(writer, "Content-type: text/html\r\n").ok();
     write!(writer, "\r\n").ok();
@@ -179,30 +181,34 @@ fn handle_page<W: core::fmt::Write, P: StatefulOutputPin>(writer: &mut W, pin: &
                 body {{
                     font-family: sans-serif;
                 }}
+
+                button {{
+                    font-weight:bold;
+                    -webkit-appearance: none;
+                    border: 1px solid #444;
+                    background: #eee;
+                    padding: 15px;
+                    display: inline-block;
+                }}
                 </style>
             </head>
             <body>
                 <h1>Hello, World!</h1>
-                The LED is <strong>{}</strong>.
 
                 <form method=POST style='margin-top: 20px; text-align: center'>
-                    <button type=submit style='
-                        font-weight:bold;
-                        -webkit-appearance: none;
-                        border: 1px solid #444;
-                        background: #eee;
-                        padding: 15px;
-                        display: inline-block;'>
-                        Toggle LED
+                    <button type=submit name="color" value="teal">
+                        Teal
+                    </button>
+                    <button type=submit name="color" value="yellow">
+                        Yellow
+                    </button>
+                    <button type=submit name="color" value="pink">
+                        Pink
                     </button>
                 </form>
             </body>
         </html>",
-        if pin.is_set_high().ok().unwrap() {
-            "on"
-        } else {
-            "off"
-        }
+        "off"
     )
     .ok();
 }

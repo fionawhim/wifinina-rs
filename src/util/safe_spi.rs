@@ -1,9 +1,9 @@
 /// Trait for an object that represents a chip select pin selecting a member of
 /// the bus.
 ///
-/// It is expected that a ChipSelect implementation is guarding a bus. If
-/// selection succeeds, it returns a SafeSpi instance that can be used to access
-/// the bus. Once SafeSpi goes out of scope, it will call deselect.
+/// Expected to have a select method that returns a SafeSpi object that, when it
+/// goes out of scope, will call deselect so that the ChipSelect implementation
+/// can update its pin to no longer be selecting.
 pub trait ChipSelect {
     type Spi;
 
@@ -39,12 +39,14 @@ impl<'a, S, CS: ChipSelect<Spi = S>> Drop for SafeSpi<'a, S, CS> {
 impl<'a, S, CS: ChipSelect<Spi = S>> core::ops::Deref for SafeSpi<'a, S, CS> {
     type Target = S;
 
+    /// Make it convenient to get to the underlying SPI.
     fn deref(&self) -> &Self::Target {
         &self.spi
     }
 }
 
 impl<'a, S, CS: ChipSelect<Spi = S>> core::ops::DerefMut for SafeSpi<'a, S, CS> {
+    /// Make it convenient to get to the underlying SPI.
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.spi
     }
