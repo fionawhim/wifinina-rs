@@ -353,7 +353,7 @@ where
     pub fn socket_write_udp(
         &mut self,
         spi: &mut Spi,
-        socket: &ServerSocket<CsPin, Spi>,
+        socket: &Socket<CsPin, Spi>,
         bytes: &mut dyn ExactSizeIterator<Item = u8>,
     ) -> Result<usize, Error<SpiError>> {
         let mut bytes_written: usize = 0;
@@ -391,7 +391,7 @@ where
     pub fn socket_send_udp(
         &mut self,
         spi: &mut Spi,
-        socket: &ServerSocket<CsPin, Spi>,
+        socket: &Socket<CsPin, Spi>,
     ) -> Result<usize, Error<SpiError>> {
         let mut response = 0u16;
 
