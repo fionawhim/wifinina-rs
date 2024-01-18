@@ -101,7 +101,7 @@ where
         + embedded_hal::blocking::spi::Write<u8, Error = SpiError>
         + embedded_hal::blocking::spi::WriteIter<u8, Error = SpiError>,
     CountDown: embedded_hal::timer::CountDown<Time = CountDownTime>,
-    CountDownTime: From<Duration>,
+    CountDownTime: From<fugit::Duration<u32, 1, 1_000_000>>,
 {
     /// Creates a `WifiNina` instance.
     ///
@@ -140,13 +140,15 @@ where
     {
         reset.set_low().map_err(|_| Error::ResetPinError)?;
 
-        self.timer.start(Duration::from_millis(200));
+        self.timer
+            .start(fugit::Duration::<u32, 1, 1_000_000>::millis(200));
         block!(self.timer.wait()).unwrap();
 
         reset.set_high().map_err(|_| Error::ResetPinError)?;
 
         // Give the chip time to start back up.
-        self.timer.start(Duration::from_millis(750));
+        self.timer
+            .start(fugit::Duration::<u32, 1, 1_000_000>::millis(750));
         block!(self.timer.wait()).unwrap();
 
         Ok(())

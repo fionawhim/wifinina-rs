@@ -106,9 +106,9 @@ pub enum NinaCommand {
     StartScanNetworks = 0x36,
     GetFirmwareVersion = 0x37,
     // Unused = 0x38,
-    // SendUdpData = 0x39,
+    SendUdpData = 0x39,
     /// Returns the remote IP and port for a socket.
-    // GetRemoteData = 0x3A,
+    GetRemoteData = 0x3A,
     // GetTime = 0x3B,
     // GetIdxBssid = 0x3C,
     // GetIdxChannel = 0x3D,
@@ -125,7 +125,7 @@ pub enum NinaCommand {
     SendDataTcp = 0x44,
     GetDatabufTcp = 0x45,
     /// Writes data to a UDP socket
-    // InsertDatabuf = 0x46,
+    InsertDatabuf = 0x46,
     // SetEnterpriseIdent = 0x4A, // > 1.2.1
     // SetEnterpriseUsername = 0x4B, // > 1.2.1
     // SetEnterprisePassword = 0x4C, // > 1.2.1

@@ -271,7 +271,7 @@ where
         Ok(ServerSocket::from_socket(socket))
     }
 
-    /// Returns a [`ConnectedSocket`](struct.ConnectedSocket.html) for the next
+    /// Returns [`ConnectedSocket`](struct.ConnectedSocket.html) for the next
     /// client that connects to the server.
     ///
     /// Can be used with `nb::block!` to wait for a client to connect.
@@ -343,6 +343,68 @@ where
         }
 
         Ok(bytes_written)
+    }
+
+    /// Copy of socket_write but for UDP
+    ///
+    /// May crash
+    ///
+    /// Exercise caution
+    pub fn socket_write_udp(
+        &mut self,
+        spi: &mut Spi,
+        socket: &Socket<CsPin, Spi>,
+        bytes: &mut dyn ExactSizeIterator<Item = u8>,
+    ) -> Result<usize, Error<SpiError>> {
+        let mut bytes_written: usize = 0;
+        let mut bytes_left = bytes.len();
+
+        // We can only write up to 4000 bytes at a time (MAX_WRITE_BYTES) so we
+        // loop to write in 4000 byte chunks as necessary.
+        while bytes_left > 0 {
+            let mut bytes_just_written = 0u16;
+
+            self.send_and_receive(
+                spi,
+                NinaCommand::InsertDatabuf,
+                Params::with_16_bit_length(&mut [
+                    SendParam::Byte(socket.num()),
+                    SendParam::Bytes(&mut bytes.take(MAX_WRITE_BYTES)),
+                ]),
+                // Yes, this comes back in little-endian rather than in network order.
+                Params::of(&mut [RecvParam::LEWord(&mut bytes_just_written)]),
+            )?;
+
+            let bytes_just_written_usize: usize = bytes_just_written.into();
+            bytes_written += bytes_just_written_usize;
+            bytes_left -= bytes_just_written_usize;
+        }
+
+        Ok(bytes_written)
+    }
+
+    /// Sends data prepared with [WifiNina::socket_write_udp()](#method.socket_write_udp), purging the buffer
+    ///
+    /// Data on the UDP socket will accumulate until sent.
+    ///
+    /// You can only get rid of it by sending (?)
+    pub fn socket_send_udp(
+        &mut self,
+        spi: &mut Spi,
+        socket: &Socket<CsPin, Spi>,
+    ) -> Result<usize, Error<SpiError>> {
+        let mut response = 0u16;
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::SendUdpData,
+            Params::of(&mut [SendParam::Byte(socket.num())]),
+            Params::of(&mut [RecvParam::LEWord(&mut response)]),
+        )?;
+
+        let response_usize: usize = response.into();
+
+        Ok(response_usize) // TODO: Find out what the command should return
     }
 
     /// Reads binary data from a socket into the buffer.
