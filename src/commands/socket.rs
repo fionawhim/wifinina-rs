@@ -141,6 +141,20 @@ where
         //     Params::of(&mut [RecvParam::OptionalByte(&mut result)]),
         // )?,
 
+        match protocol {
+            Protocol::Udp => {
+                // UDP sockets are always "connected" so we don’t need to wait
+                // for them to connect.
+                return Ok(SocketStatus::Established);
+            }
+            Protocol::UdpMulticast => {
+                // UDP multicast sockets are always "connected" so we don’t need
+                // to wait for them to connect.
+                return Ok(SocketStatus::Established);
+            }
+            _ => {}
+        }
+
         if result.is_none() {
             // WiFiNINA provides no return value if its internal "connect" or
             // "beginPacket" methods fail.
@@ -355,32 +369,21 @@ where
         spi: &mut Spi,
         socket: &Socket<CsPin, Spi>,
         bytes: &mut dyn ExactSizeIterator<Item = u8>,
-    ) -> Result<usize, Error<SpiError>> {
-        let mut bytes_written: usize = 0;
-        let mut bytes_left = bytes.len();
+    ) -> Result<bool, Error<SpiError>> {
+        let mut response = 0u8;
 
-        // We can only write up to 4000 bytes at a time (MAX_WRITE_BYTES) so we
-        // loop to write in 4000 byte chunks as necessary.
-        while bytes_left > 0 {
-            let mut bytes_just_written = 0u16;
+        self.send_and_receive(
+            spi,
+            NinaCommand::InsertDatabuf,
+            Params::with_16_bit_length(&mut [
+                SendParam::Byte(socket.num()),
+                SendParam::Bytes(&mut bytes.take(MAX_WRITE_BYTES)),
+            ]),
+            // Yes, this comes back in little-endian rather than in network order.
+            Params::of(&mut [RecvParam::Byte(&mut response)]),
+        )?;
 
-            self.send_and_receive(
-                spi,
-                NinaCommand::InsertDatabuf,
-                Params::with_16_bit_length(&mut [
-                    SendParam::Byte(socket.num()),
-                    SendParam::Bytes(&mut bytes.take(MAX_WRITE_BYTES)),
-                ]),
-                // Yes, this comes back in little-endian rather than in network order.
-                Params::of(&mut [RecvParam::LEWord(&mut bytes_just_written)]),
-            )?;
-
-            let bytes_just_written_usize: usize = bytes_just_written.into();
-            bytes_written += bytes_just_written_usize;
-            bytes_left -= bytes_just_written_usize;
-        }
-
-        Ok(bytes_written)
+        Ok(response == 1)
     }
 
     /// Sends data prepared with [WifiNina::socket_write_udp()](#method.socket_write_udp), purging the buffer
@@ -392,19 +395,19 @@ where
         &mut self,
         spi: &mut Spi,
         socket: &Socket<CsPin, Spi>,
-    ) -> Result<usize, Error<SpiError>> {
-        let mut response = 0u16;
+    ) -> Result<bool, Error<SpiError>> {
+        let mut response = 0u8;
 
         self.send_and_receive(
             spi,
             NinaCommand::SendUdpData,
             Params::of(&mut [SendParam::Byte(socket.num())]),
-            Params::of(&mut [RecvParam::LEWord(&mut response)]),
+            Params::of(&mut [RecvParam::Byte(&mut response)]),
         )?;
 
         let response_usize: usize = response.into();
 
-        Ok(response_usize) // TODO: Find out what the command should return
+        Ok(response_usize == 1)
     }
 
     /// Reads binary data from a socket into the buffer.

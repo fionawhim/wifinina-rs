@@ -1,6 +1,6 @@
 [package]
 name = "wifinina"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Fiona Hopkins <fiona@fionawh.im>"]
 keywords = ["cortex-m", "embedded-hal", "wifi", "esp32", "pyportal"]
 categories = ["no-std", "embedded", "network-programming"]
@@ -29,7 +29,7 @@ fugit = "0.3.7"
 [dev-dependencies]
 cortex-m-rt = "~0.6"
 smart-leds = "~0.3"
-panic-halt = "~0.2" 
+panic-halt = "~0.2"
 serde-json-core = "~0.1.0"
 # These versions match those in serde-json-core 0.1.0
 serde = {version = "1.0.80", default-features = false, features=["serde_derive"] }
