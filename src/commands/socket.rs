@@ -233,9 +233,9 @@ where
     /// [`ConnectedSocket`](struct.ConnectedSocket.html) to automatically close
     /// the connection.
     ///
-    /// TODO(fiona): Make this work with UDP, which needs to create a server
-    /// socket. [CircuitPython
-    /// code](https://github.com/adafruit/Adafruit_CircuitPython_ESP32SPI/blob/522df976fd25f0ddd8648bfe5324b6e30f76d0a0/adafruit_esp32spi/adafruit_esp32spi.py#L754)
+    /// To use with UDP, use [`socket_write_udp`](#method.socket_write_udp) and
+    /// [`socket_send_udp`](#method.socket_send_udp) instead of this.
+    /// Start an UDP server with [`socket_start_udp_server`](#method.socket_start_udp_server)
     pub fn connect<'wifi, 'sock>(
         &'wifi mut self,
         spi: &'wifi mut Spi,
