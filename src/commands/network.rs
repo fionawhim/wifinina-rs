@@ -45,7 +45,7 @@ where
 
     /// Queries the chip to do a DNS lookup of the given hostname and return the
     /// IP address.
-    /// 
+    ///
     /// Returns None if the DNS did not find an IP.
     pub fn resolve_host_name(
         &mut self,
@@ -54,7 +54,7 @@ where
     ) -> Result<Option<[u8; 4]>, Error<SpiError>> {
         let mut ip = [0u8; 4];
 
-        let mut success= 0u8;
+        let mut success = 0u8;
 
         // The API divides this across two calls so that it can return the
         // success / failure in the first and the actual bytes in the second.
@@ -62,7 +62,7 @@ where
             spi,
             NinaCommand::RequestHostByName,
             Params::of(&mut [SendParam::Bytes(&mut name.bytes())]),
-            Params::of(&mut [RecvParam::Byte( &mut success )]),
+            Params::of(&mut [RecvParam::Byte(&mut success)]),
         )?;
 
         if success == 0 {

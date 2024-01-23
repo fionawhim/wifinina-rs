@@ -16,6 +16,8 @@ use embedded_hal::timer::CountDown;
 use crate::commands::*;
 use crate::{Error, WifiNina};
 
+use self::remote_info::RemoteInfo;
+
 /// WiFiNINA has a 4092 byte command buffer limit. See: SPI_MAX_DMA_LEN
 /// https://github.com/espressif/esp-idf/blob/master/components/driver/include/driver/spi_common.h#L31
 ///
@@ -64,6 +66,36 @@ where
         }
 
         Ok(Socket::new(socket_num))
+    }
+
+    /// Starts an UDP server on a socket obtained with [`socket_new`](#method.socket_new).
+    ///
+    /// This UDP server will be able to send packets with [`socket_write_udp`](#method.socket_write_udp)
+    ///
+    /// and receive them using [`socket_read`](#method.socket_read).
+    pub fn socket_start_udp_server(
+        &mut self,
+        spi: &mut Spi,
+        socket: &Socket<CsPin, Spi>,
+        port: u16,
+    ) -> Result<(), Error<SpiError>> {
+        let mut status: u8 = 0;
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::StartServerTcp, // yeah, this starts both udp and tcp for some reason.
+            Params::of(&mut [
+                SendParam::Word(port),
+                SendParam::Byte(socket.num()),
+                SendParam::Byte(Protocol::Udp.into()),
+            ]),
+            Params::of(&mut [RecvParam::Byte(&mut status)]),
+        )?;
+
+        match status {
+            1 => Ok(()),
+            _ => Err(Error::SocketConnectionFailed(SocketStatus::UnknownStatus)),
+        }
     }
 
     /// Returns the status of the given `Socket`
@@ -360,10 +392,7 @@ where
     }
 
     /// Copy of socket_write but for UDP
-    ///
-    /// May crash
-    ///
-    /// Exercise caution
+    /// You need to explicitly send data with [WifiNina::socket_send_udp()](#method.socket_send_udp)
     pub fn socket_write_udp(
         &mut self,
         spi: &mut Spi,
@@ -390,7 +419,7 @@ where
     ///
     /// Data on the UDP socket will accumulate until sent.
     ///
-    /// You can only get rid of it by sending (?)
+    /// You can only get rid of it by sending
     pub fn socket_send_udp(
         &mut self,
         spi: &mut Spi,
@@ -427,29 +456,7 @@ where
         socket: &Socket<CsPin, Spi>,
         buf: &mut [u8],
     ) -> Result<usize, nb::Error<Error<SpiError>>> {
-        let mut available: u16 = 0;
-
-        // When given a client socket, AvailableDataTcp returns the number of
-        // bytes available.
-        //
-        // TODO(fiona): Do we need to check for available data before reading?
-        // Could we just return WouldBlock if the read result is 0?
-        self.send_and_receive(
-            spi,
-            NinaCommand::AvailableDataTcp,
-            Params::of(&mut [SendParam::Byte(socket.num())]),
-            Params::of(&mut [RecvParam::LEWord(&mut available)]),
-        )
-        .map_err(nb::Error::Other)?;
-
-        if available == 0 {
-            return match self.socket_status(spi, socket)? {
-                SocketStatus::Closed => Ok(0),
-                _ => Err(nb::Error::WouldBlock),
-            };
-        }
-
-        let read_limit = core::cmp::min(available, buf.len() as u16);
+        let read_limit = buf.len() as u16;
         let mut read_len: usize = 0;
 
         self.send_and_receive(
@@ -464,6 +471,27 @@ where
         .map_err(nb::Error::Other)?;
 
         Ok(read_len)
+    }
+
+    /// Reads the IP Address and port of the last connection made to this socket
+    ///
+    /// Particularly useful when replying to UDP packets.
+    pub fn socket_remote_info(
+        &mut self,
+        spi: &mut Spi,
+        socket: &Socket<CsPin, Spi>,
+    ) -> Result<RemoteInfo, Error<SpiError>> {
+        let mut ip: [u8; 4] = [0; 4];
+        let mut port: u16 = 0;
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::GetRemoteData,
+            Params::of(&mut [SendParam::Byte(socket.num())]),
+            Params::of(&mut [RecvParam::ByteArray(&mut ip), RecvParam::LEWord(&mut port)]),
+        )?;
+
+        Ok(RemoteInfo { ip, port })
     }
 }
 

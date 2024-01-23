@@ -1,5 +1,6 @@
 pub mod extras;
 pub mod network;
+pub mod remote_info;
 pub mod socket;
 pub mod wifi;
 
@@ -141,9 +142,9 @@ pub enum NinaCommand {
     SetDigitalWrite = 0x51,
     SetAnalogWrite = 0x52,
     /// Available in Adafruit firmware v1.5.0 and above
-    SetDigitalRead = 0x53,
+    // SetDigitalRead = 0x53,
     /// Available in Adafruit firmware v1.5.0 and above
-    SetAnalogRead = 0x54,
+    // SetAnalogRead = 0x54,
     Start = 0xE0,
     End = 0xEE,
     Error = 0xEF,

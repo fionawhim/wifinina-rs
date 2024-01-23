@@ -1,7 +1,7 @@
 [package]
 name = "wifinina"
-version = "0.0.2"
-authors = ["Fiona Hopkins <fiona@fionawh.im>"]
+version = "0.1.0"
+authors = ["Fiona Hopkins <fiona@fionawh.im>", "Stanislaw Knapinski <vaqxai@gmail.com>"]
 keywords = ["cortex-m", "embedded-hal", "wifi", "esp32", "pyportal"]
 categories = ["no-std", "embedded", "network-programming"]
 edition = "2018"
