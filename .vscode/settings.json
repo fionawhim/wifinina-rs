@@ -2,5 +2,8 @@
   "editor.detectIndentation": false,
   "editor.tabSize": 4,
   "editor.insertSpaces": true,
-  "rust.all_features": true
+  "rust.target": "thumbv7em-none-eabihf",
+  "rust.all_targets": false,
+  "rust.all_features": true,
+  "cSpell.enabled": false
 }

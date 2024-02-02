@@ -1,16 +1,70 @@
 [package]
 name = "wifinina"
-version = "0.0.1"
-authors = ["Fiona Hopkins <fiona@draughtleaders.com>"]
+version = "0.1.0"
+authors = ["Fiona Hopkins <fiona@fionawh.im>", "Stanislaw Knapinski <vaqxai@gmail.com>"]
+keywords = ["cortex-m", "embedded-hal", "wifi", "esp32", "pyportal"]
+categories = ["no-std", "embedded", "network-programming"]
 edition = "2018"
 
+[package.metadata.docs.rs]
+features = ["genio-traits", "http", "device-pyportal", "device-feather-m4"]
+default-target = "thumbv7em-none-eabihf"
+
 [dependencies]
-embedded-hal = { version = "0.2.3", features = ["unproven"]}
-nb = "0.1.2"
+embedded-hal = { version = "~0.2.3", features = ["unproven"]}
+nb = "1.0.0"
 
 genio = { version = "0.2.0", default-features = false, optional = true }
 void = { version = "1.0.2", default-features = false, optional = true }
 
+cortex-m = {version = "~0.6.3", optional = true }
+pyportal = { version="~0.5.0", optional = true, features=["unproven"] }
+feather_m4 = { version="~0.5.0", optional = true, features=["unproven"] }
+cortex-m-systick-countdown = {version = "~0.1.0", optional = true, path="../cortex-m-systick-countdown"}
+
+httparse = { version = "~1.3.4", optional = true,  default-features = false}
+
+fugit = "0.3.7"
+
+[dev-dependencies]
+cortex-m-rt = "~0.6"
+smart-leds = "~0.3"
+panic-halt = "~0.2"
+serde-json-core = "~0.1.0"
+# These versions match those in serde-json-core 0.1.0
+serde = {version = "1.0.80", default-features = false, features=["serde_derive"] }
+heapless = "0.5.0"
+ws2812-timer-delay = "~0.3.0"
+
+
 [features]
 default = []
 genio-traits = ["genio", "void"]
+device-pyportal = ["pyportal", "cortex-m", "void", "cortex-m-systick-countdown"]
+device-feather-m4 = ["feather_m4", "cortex-m", "void", "cortex-m-systick-countdown"]
+http = ["genio-traits", "httparse"]
+pyportal-examples = ["http", "device-pyportal"]
+feather-m4-examples = ["http", "device-feather-m4"]
+
+[[example]]
+name = "pyportal-ap"
+required-features = ["pyportal-examples"]
+
+[[example]]
+name = "pyportal-connect"
+required-features = ["pyportal-examples"]
+
+[[example]]
+name = "feather-m4-ap"
+required-features = ["feather-m4-examples"]
+
+[profile.dev]
+incremental = false
+codegen-units = 1
+debug = true
+lto = true
+
+[profile.release]
+debug = true
+lto = true
+opt-level = "s"
