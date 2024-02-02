@@ -197,7 +197,7 @@ where
 
         // Wait 3 seconds for the connection.
         for _ in 0..300 {
-            last_status = self.socket_status(spi, &socket)?;
+            last_status = self.socket_status(spi, socket)?;
 
             if last_status == SocketStatus::Established {
                 return Ok(SocketStatus::Established);
@@ -582,9 +582,9 @@ pub enum Protocol {
     UdpMulticast = 3,
 }
 
-impl Into<u8> for Protocol {
-    fn into(self) -> u8 {
-        self as u8
+impl From<Protocol> for u8 {
+    fn from(val: Protocol) -> Self {
+        val as u8
     }
 }
 

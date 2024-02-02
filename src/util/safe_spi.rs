@@ -41,13 +41,13 @@ impl<'a, S, CS: ChipSelect<Spi = S>> core::ops::Deref for SafeSpi<'a, S, CS> {
 
     /// Make it convenient to get to the underlying SPI.
     fn deref(&self) -> &Self::Target {
-        &self.spi
+        self.spi
     }
 }
 
 impl<'a, S, CS: ChipSelect<Spi = S>> core::ops::DerefMut for SafeSpi<'a, S, CS> {
     /// Make it convenient to get to the underlying SPI.
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.spi
+        self.spi
     }
 }

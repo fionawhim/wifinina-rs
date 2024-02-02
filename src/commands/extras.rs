@@ -26,9 +26,9 @@ impl From<u8> for ArduinoPinMode {
     }
 }
 
-impl Into<u8> for ArduinoPinMode {
-    fn into(self) -> u8 {
-        self as u8
+impl From<ArduinoPinMode> for u8 {
+    fn from(val: ArduinoPinMode) -> Self {
+        val as u8
     }
 }
 

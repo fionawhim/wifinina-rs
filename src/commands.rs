@@ -150,9 +150,9 @@ pub enum NinaCommand {
     Error = 0xEF,
 }
 
-impl Into<u8> for NinaCommand {
-    fn into(self) -> u8 {
-        self as u8
+impl From<NinaCommand> for u8 {
+    fn from(val: NinaCommand) -> Self {
+        val as u8
     }
 }
 
@@ -168,9 +168,9 @@ enum NinaResponse {
     Error = 255,
 }
 
-impl Into<u8> for NinaResponse {
-    fn into(self) -> u8 {
-        self as u8
+impl From<NinaResponse> for u8 {
+    fn from(val: NinaResponse) -> Self {
+        val as u8
     }
 }
 
@@ -342,17 +342,15 @@ where
         let use_16_bit_length = params.use_16_bit_length();
 
         let read_len = |spi: &mut Spi, expect: Option<usize>| -> Result<usize, Error<SpiError>> {
-            let len: usize;
-
-            if use_16_bit_length {
+            let len: usize = if use_16_bit_length {
                 let bits = [
                     spi.transfer_byte().map_err(Error::spi)?,
                     spi.transfer_byte().map_err(Error::spi)?,
                 ];
 
-                len = u16::from_be_bytes(bits) as usize;
+                u16::from_be_bytes(bits) as usize
             } else {
-                len = spi.transfer_byte().map_err(Error::spi)? as usize;
+                spi.transfer_byte().map_err(Error::spi)? as usize
             };
 
             if let Some(expect) = expect {

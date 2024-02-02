@@ -45,9 +45,9 @@ impl From<u8> for WifiStatus {
     }
 }
 
-impl Into<u8> for WifiStatus {
-    fn into(self) -> u8 {
-        self as u8
+impl From<WifiStatus> for u8 {
+    fn from(val: WifiStatus) -> Self {
+        val as u8
     }
 }
 
