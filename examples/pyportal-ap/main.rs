@@ -19,12 +19,13 @@ use hal::pac::{CorePeripherals, Peripherals};
 use hal::sercom;
 use hal::{pins::Sets, Pins};
 
-use wifinina::http::{HttpMethod, HttpRequestReader};
 use wifinina::pyportal as pyportal_wifi;
 use wifinina::{Error, Protocol};
 
-#[path = "../helpers.rs"]
-mod helpers;
+use weehttp::{HttpMethod, HttpRequestReader};
+
+#[path = "../pyportal_helpers.rs"]
+mod pyportal_helpers;
 
 #[entry]
 fn main() -> ! {
@@ -59,7 +60,9 @@ fn main() -> ! {
         )
         .unwrap();
 
-    let mut uart = helpers::stemma_uart(
+    // If you have a STEMMA connector and a SLAB-to-USB adapter you can plug
+    // them together to get TTL output from this example (115200 baud).
+    let mut uart = pyportal_helpers::stemma_uart(
         peripherals.SERCOM5,
         &mut clocks,
         &gclk2,
@@ -73,7 +76,7 @@ fn main() -> ! {
 
     let sys_tick = pyportal_wifi::sys_tick(core_peripherals.SYST, &mut clocks);
 
-    write!(&mut uart, "Making SPI…\r\n").ok();
+    write!(&mut uart, "Making SPI and WifiNina…\r\n").ok();
 
     let mut spi = pyportal_wifi::spi(
         &mut clocks,
@@ -119,6 +122,8 @@ fn main() -> ! {
     .ok();
 
     loop {
+        // server_select will return a ConnectedSocket to a client that connects
+        // to it.
         let client_socket = block!(wifi.server_select(&mut spi, &server_socket)).unwrap();
         handle_client(&mut uart, client_socket, &mut led);
     }
@@ -141,21 +146,20 @@ fn handle_client<
         Ok(head) => {
             write!(uart, "{} {}\r\n", head.method, head.path).ok();
 
-            if head.path == "/" {
-                match head.method {
-                    HttpMethod::Get => handle_page(&mut request_reader.free(), led),
-                    HttpMethod::Post => {
-                        // We get a POST when the user presses the
-                        // toggle button.
-                        led.toggle().ok();
-                        handle_redirect(&mut request_reader.free(), "/");
-                    }
-                    _ => {
-                        handle_method_not_allowed(&mut request_reader.free());
+            match head.path {
+                "/" => {
+                    match head.method {
+                        HttpMethod::Get => handle_page(&mut request_reader.free(), led),
+                        HttpMethod::Post => {
+                            // We get a POST when the user presses the
+                            // toggle button.
+                            led.toggle().ok();
+                            handle_redirect(&mut request_reader.free(), "/");
+                        }
+                        _ => handle_method_not_allowed(&mut request_reader.free()),
                     }
                 }
-            } else {
-                handle_not_found(&mut request_reader.free());
+                _ => handle_not_found(&mut request_reader.free()),
             }
         }
         Err(err) => {
@@ -165,7 +169,7 @@ fn handle_client<
 }
 
 fn handle_page<W: core::fmt::Write, P: StatefulOutputPin>(writer: &mut W, pin: &mut P) {
-    write!(writer, "HTTP/1.1 200 OK\r\n").ok();
+    write!(writer, "HTTP/1.0 200 OK\r\n").ok();
     write!(writer, "Content-type: text/html\r\n").ok();
     write!(writer, "\r\n").ok();
     write!(
@@ -208,14 +212,14 @@ fn handle_page<W: core::fmt::Write, P: StatefulOutputPin>(writer: &mut W, pin: &
 }
 
 fn handle_redirect<W: core::fmt::Write>(writer: &mut W, location: &str) {
-    write!(writer, "HTTP/1.1 303 See Other\r\n").ok();
+    write!(writer, "HTTP/1.0 303 See Other\r\n").ok();
     write!(writer, "Location: {}\r\n", location).ok();
 }
 
 fn handle_not_found<W: core::fmt::Write>(writer: &mut W) {
-    write!(writer, "HTTP/1.1 404 Not Found\r\n").ok();
+    write!(writer, "HTTP/1.0 404 Not Found\r\n").ok();
 }
 
 fn handle_method_not_allowed<W: core::fmt::Write>(writer: &mut W) {
-    write!(writer, "HTTP/1.1 405 Method Not Allowed\r\n").ok();
+    write!(writer, "HTTP/1.0 405 Method Not Allowed\r\n").ok();
 }

@@ -26,9 +26,6 @@ mod chip_select;
 mod commands;
 mod util;
 
-#[cfg(feature = "http")]
-pub mod http;
-
 #[cfg(feature = "device-pyportal")]
 pub mod pyportal;
 
@@ -45,6 +42,7 @@ use nb::block;
 use chip_select::*;
 
 pub use commands::{
+    extras::{ArduinoPinMode, EspAttenuation},
     socket::{ConnectedSocket, Destination, Protocol, ServerSocket, Socket, SocketStatus},
     wifi::{WifiScanResults, WifiStatus},
 };

@@ -35,10 +35,14 @@ pub enum NinaCommand {
     #[allow(dead_code)]
     SetKey = 0x12,
     // Unused = 0x13,
-    // SetIpConfig = 0x14,
-    // SetDnsConfig = 0x15,
-    // SetHostname = 0x16,
-    // SetPowerMode = 0x17,
+    /// Sets IP, gateway IP, and subnet mask in that order.
+    SetIpConfig = 0x14,
+    /// Sets two DNS server IPs.
+    SetDnsConfig = 0x15,
+    /// Sets the DHCP name for the ESP32.
+    SetHostname = 0x16,
+    /// Puts the device in low power mode.
+    SetPowerMode = 0x17,
     /// Creates an access point.
     SetApNetwork = 0x18,
     /// Creates an access point with a password.
@@ -55,12 +59,20 @@ pub enum NinaCommand {
     ///
     /// See [`WifiStatus`](enum.WifiStatus.html).
     GetConnectionStatus = 0x20,
+    /// Returns the client IP address, subnet mask, and gateway IP address, in
+    /// that order.
     GetIpAddress = 0x21,
-    // GetMacAddress = 0x22,
-    // GetCurrentSsid = 0x23,
-    // GetCurrentBssid = 0x24,
-    // GetCurrentRssi = 0x25,
-    // GetCurrentEnct = 0x26,
+    /// Returns the WiFi chip’s MAC address.
+    GetMacAddress = 0x22,
+    /// Returns the SSID for the current Wi-Fi network.
+    GetCurrentSsid = 0x23,
+    /// Returns the BSSID (MAC address) for the current Wi-Fi network.
+    GetCurrentBssid = 0x24,
+    /// Returns the RSSI as a 32-bit integer, though internally the ESP32 stores
+    /// it as a byte.
+    GetCurrentRssi = 0x25,
+    /// Returns the type of encryption used on the current Wi-Fi network.
+    GetCurrentEnct = 0x26,
     /// Returns SSIDs for all networks the chip knows about.
     ScanNetworks = 0x27,
     /// Starts a TCP, UDP, or Multicast UDP server on a port for the provided
@@ -179,9 +191,8 @@ where
     BusyPin: InputPin,
     CsPin: OutputPin,
     SpiError: core::fmt::Debug,
-    Spi: FullDuplex<u8, Error = SpiError>
-        + embedded_hal::blocking::spi::Write<u8, Error = SpiError>
-        + embedded_hal::blocking::spi::WriteIter<u8, Error = SpiError>,
+    Spi:
+        FullDuplex<u8, Error = SpiError> + embedded_hal::blocking::spi::Write<u8, Error = SpiError>,
     CountDown: embedded_hal::timer::CountDown<Time = CountDownTime>,
     CountDownTime: From<Duration>,
 {
@@ -280,30 +291,28 @@ where
         };
 
         // Helper function to just write bytes to the bus.
-        let write_bytes = |spi: &mut Spi, bytes: &mut dyn Iterator<Item = u8>| {
-            spi.write_iter(bytes).map_err(Error::spi)
-        };
+        let write_bytes = |spi: &mut Spi, bytes: &[u8]| spi.write(bytes).map_err(Error::spi);
 
         for p in params {
             match p {
-                SendParam::Byte(b) => {
+                SendParam::U8(b) => {
                     write_len(&mut spi, 1)?;
-                    write_bytes(&mut spi, &mut [*b].iter().cloned())?;
+                    write_bytes(&mut spi, &[*b])?;
                 }
 
-                SendParam::Word(w) => {
+                SendParam::U16(w) => {
                     write_len(&mut spi, 2)?;
-                    write_bytes(&mut spi, &mut w.to_be_bytes().iter().cloned())?;
+                    write_bytes(&mut spi, &w.to_be_bytes())?;
                 }
 
-                SendParam::LEWord(w) => {
+                SendParam::U16LE(w) => {
                     write_len(&mut spi, 2)?;
-                    write_bytes(&mut spi, &mut w.to_le_bytes().iter().cloned())?;
+                    write_bytes(&mut spi, &w.to_le_bytes())?;
                 }
 
-                SendParam::Bytes(it) => {
-                    write_len(&mut spi, it.len())?;
-                    write_bytes(&mut spi, it)?;
+                SendParam::U8Array(bytes) => {
+                    write_len(&mut spi, bytes.len())?;
+                    write_bytes(&mut spi, bytes)?;
                 }
             };
         }
@@ -372,11 +381,11 @@ where
             // This handles the case where the chip has told us, through
             // param_count, a number of response parameters that is fewer than
             // the number we’re prepared for. We’re ok with that as long as
-            // every param from here to the end is an OptionalByte. Otherwise we
+            // every param from here to the end is an OptionalU8. Otherwise we
             // error.
             if param_idx == param_count {
                 match param_handler {
-                    RecvParam::OptionalByte(_) => continue,
+                    RecvParam::OptionalU8(_) => continue,
                     _ => return Err(Error::MissingParam(param_idx)),
                 }
             };
@@ -387,28 +396,17 @@ where
                     Self::expect_byte(&mut spi, NinaResponse::Ack.into())?;
                 }
 
-                RecvParam::Byte(ref mut b) => {
+                RecvParam::U8(ref mut b) => {
                     read_len(&mut spi, Some(1))?;
                     **b = spi.transfer_byte().map_err(Error::spi)?;
                 }
 
-                RecvParam::OptionalByte(ref mut op) => {
+                RecvParam::OptionalU8(ref mut op) => {
                     read_len(&mut spi, Some(1))?;
                     op.replace(spi.transfer_byte().map_err(Error::spi)?);
                 }
 
-                RecvParam::Word(ref mut w) => {
-                    read_len(&mut spi, Some(2))?;
-
-                    let bits = [
-                        spi.transfer_byte().map_err(Error::spi)?,
-                        spi.transfer_byte().map_err(Error::spi)?,
-                    ];
-
-                    **w = u16::from_be_bytes(bits);
-                }
-
-                RecvParam::LEWord(ref mut w) => {
+                RecvParam::U16LE(ref mut w) => {
                     read_len(&mut spi, Some(2))?;
 
                     let bits = [
@@ -417,6 +415,19 @@ where
                     ];
 
                     **w = u16::from_le_bytes(bits);
+                }
+
+                RecvParam::I32LE(ref mut w) => {
+                    read_len(&mut spi, Some(4))?;
+
+                    let bits = [
+                        spi.transfer_byte().map_err(Error::spi)?,
+                        spi.transfer_byte().map_err(Error::spi)?,
+                        spi.transfer_byte().map_err(Error::spi)?,
+                        spi.transfer_byte().map_err(Error::spi)?,
+                    ];
+
+                    **w = i32::from_le_bytes(bits);
                 }
 
                 RecvParam::Float(ref mut w) => {
@@ -432,7 +443,7 @@ where
                     **w = f32::from_le_bytes(bits);
                 }
 
-                RecvParam::ByteArray(arr) => {
+                RecvParam::U8Array(arr) => {
                     read_len(&mut spi, Some(arr.len()))?;
 
                     for i in 0..arr.len() {
@@ -440,7 +451,7 @@ where
                     }
                 }
 
-                RecvParam::Buffer(arr, ref mut len) => {
+                RecvParam::U8Buffer(arr, ref mut len) => {
                     let incoming_len = read_len(&mut spi, None)?;
 
                     // We’ll only read up to the buffer’s length.
@@ -484,16 +495,17 @@ where
 }
 
 pub enum SendParam<'a> {
-    /// Param is a single byte
-    Byte(u8),
-    /// Param is a word, to be sent in big-endian, network order
-    Word(u16),
-    /// Param is a word, to be sent in little-endian order. The WiFiNINA
-    /// protocol differs command-to-command what byte order to use.
-    LEWord(u16),
-    /// Param is of arbitrary length (e.g. string data), though the length must
-    /// be known so we can send it as a prefix
-    Bytes(&'a mut dyn ExactSizeIterator<Item = u8>),
+    /// Param is a single byte.
+    U8(u8),
+    /// Param is a word, to be sent in big-endian, network order.
+    U16(u16),
+    /// Param is a word, to be sent in little-endian order.
+    ///
+    /// The WiFiNINA protocol differs command-to-command what byte order to use.
+    /// You have to look at the source code.
+    U16LE(u16),
+    /// Param is a sequence of bytes.
+    U8Array(&'a [u8]),
 }
 
 #[allow(dead_code)]
@@ -501,23 +513,26 @@ pub enum RecvParam<'a> {
     /// Asserts that the parameter will be the Ack byte (1)
     Ack,
     /// Receives a byte.
-    Byte(&'a mut u8),
-    /// Receives a byte, but does not error if the chip doesn’t provide it. Some
-    /// commands don’t return a consistent number of values.
-    OptionalByte(&'a mut Option<u8>),
-    /// Receives a word in network byte order.
-    Word(&'a mut u16),
+    U8(&'a mut u8),
+    /// Receives a byte, but does not error if the chip doesn’t provide it.
+    ///
+    /// Some commands don’t return a consistent number of values.
+    OptionalU8(&'a mut Option<u8>),
     /// Receives a word in little-endian byte order, which is the native byte
     /// order on the ESP32.
-    LEWord(&'a mut u16),
+    U16LE(&'a mut u16),
     /// Receives a 32-bit float.
     Float(&'a mut f32),
+    /// Receives a 32-bit int in little-endian byte order, which is the native
+    /// byte order on the ESP32.
+    I32LE(&'a mut i32),
     /// Receives a known, fixed number of bytes (often an IP address).
-    ByteArray(&'a mut [u8]),
+    U8Array(&'a mut [u8]),
     /// Reads bytes into a buffer, up to its length, and sets the second value
-    /// to the number of bytes read. (Bytes beyond the buffer size are silently
-    /// dropped.)
-    Buffer(&'a mut [u8], &'a mut usize),
+    /// to the number of bytes read.
+    ///
+    /// (Bytes beyond the buffer size are silently dropped.)
+    U8Buffer(&'a mut [u8], &'a mut usize),
 }
 
 /// Structure to hold the set of parameters for both sending a command and

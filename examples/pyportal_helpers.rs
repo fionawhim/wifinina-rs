@@ -10,13 +10,13 @@ use hal::sercom::PadPin;
 use hal::time::Hertz;
 use hal::timer::SpinTimer;
 
-use core::fmt::Write;
-
 use ws2812_timer_delay::Ws2812;
 
 /// Creates a UART for the 4-pin JST STEMMA connector on the left side of the
-/// PyPortal. Used to write debug and logging information, but not necessary for
-/// seeing this example run.
+/// PyPortal.
+///
+/// Used to write debug and logging information, but not necessary for
+/// seeing these examples run.
 ///
 /// Runs at 115200 baud.
 pub fn stemma_uart(
@@ -46,6 +46,7 @@ pub fn stemma_uart(
 /// Creates a Ws2812 to control the PyPortal’s onboard NeoPixel.
 ///
 /// You’ll likely need to have `use smart_leds::SmartLedsWrite;`
+#[allow(dead_code)]
 pub fn onboard_neopixel(
     port: &mut gpio::Port,
     neopixel: gpio::Pb22<gpio::Input<gpio::Floating>>,

@@ -15,15 +15,17 @@ use hal::clock::GenericClockController;
 use hal::entry;
 use hal::pac::gclk;
 use hal::pac::{CorePeripherals, Peripherals};
-use hal::prelude::*;
 use hal::{pins::Sets, Pins};
 
-use wifinina::http::{HttpMethod, HttpRequestReader, HttpResponseReader};
 use wifinina::pyportal as pyportal_wifi;
 use wifinina::pyportal::prelude::*;
 use wifinina::{Destination, Protocol, WifiScanResults, WifiStatus};
 
 use genio::Read;
+use weehttp::{
+    HtmlEscaper, HttpMethod, HttpRequestReader, HttpResponseReader, UrlEncodedParams,
+    UrlEncodedParamsError,
+};
 
 use heapless;
 use heapless::consts::*;
@@ -33,9 +35,8 @@ use serde_json_core;
 
 use smart_leds::{SmartLedsWrite, RGB8};
 
-#[path = "../helpers.rs"]
-mod helpers;
-use helpers::{HtmlEscape, UriDecode};
+#[path = "../pyportal_helpers.rs"]
+mod pyportal_helpers;
 
 type Color = [u8; 3];
 
@@ -70,7 +71,8 @@ fn main() -> ! {
     // Not used, but we keep it for debugging.
     let _led = d13.into_push_pull_output(&mut port);
 
-    let mut neopixel = helpers::onboard_neopixel(&mut port, neopixel);
+    let mut neopixel = pyportal_helpers::onboard_neopixel(&mut port, neopixel);
+    neopixel.write([[30, 0, 30]].iter().cloned()).ok();
 
     let gclk2 = clocks
         .configure_gclk_divider_and_source(
@@ -81,9 +83,9 @@ fn main() -> ! {
         )
         .unwrap();
 
-    let mut uart = helpers::stemma_uart(
-        &mut clocks,
+    let mut uart = pyportal_helpers::stemma_uart(
         peripherals.SERCOM5,
+        &mut clocks,
         &gclk2,
         &mut peripherals.MCLK,
         &mut port,
@@ -96,8 +98,8 @@ fn main() -> ! {
     let sys_tick = pyportal_wifi::sys_tick(core_peripherals.SYST, &mut clocks);
 
     let mut spi = pyportal_wifi::spi(
-        peripherals.SERCOM2,
         &mut clocks,
+        peripherals.SERCOM2,
         &mut peripherals.MCLK,
         &mut port,
         spi,
@@ -120,6 +122,14 @@ fn main() -> ! {
         }
     }
 
+    let mac = wifi.mac_address(&mut spi).unwrap();
+    write!(
+        uart,
+        "MAC address: {:02x}::{:02x}::{:02x}::{:02x}::{:02x}::{:02x}\r\n",
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]
+    )
+    .ok();
+
     // Create the server_socket once outside of the loop because once it’s
     // created it doesn’t ever get collected.
     let server_socket = wifi
@@ -127,8 +137,8 @@ fn main() -> ! {
         .unwrap();
 
     // Initialize these to avoid having to use the web page each time.
-    let mut ssid: Option<heapless::String<U256>> = Some(heapless::String::from("GrogNet"));
-    let mut password: Option<heapless::String<U32>> = Some(heapless::String::from("fuffle"));
+    let mut ssid: Option<heapless::String<U32>> = None; //Some(heapless::String::from("GrogNet"));
+    let mut password: Option<heapless::String<U64>> = None; //Some(heapless::String::from("fufflekittens"));
 
     // Loop between two modes: getting the SSID and password, and doing network
     // stuff.
@@ -210,6 +220,9 @@ fn main() -> ! {
         // Switch to green once we’re connected.
         neopixel.write([[0, 30, 0]].iter().cloned()).ok();
 
+        let rssi = wifi.wifi_rssi(&mut spi).unwrap();
+        write!(uart, "RSSI: {} dBm\r\n", rssi).ok();
+
         loop {
             let colors = fetch_colors(&mut uart, &mut wifi, &mut spi).unwrap();
 
@@ -260,7 +273,7 @@ fn handle_client(
                 match head.method {
                     HttpMethod::Get => handle_home_page(&mut request_reader.free(), scan_results),
                     HttpMethod::Post => {
-                        handle_connect_post(&mut request_reader, ssid, password);
+                        handle_connect_post(uart, &mut request_reader, ssid, password).ok();
                         handle_redirect(&mut request_reader.free(), "/");
                     }
                     _ => {
@@ -278,7 +291,7 @@ fn handle_client(
 }
 
 fn handle_home_page<W: core::fmt::Write>(writer: &mut W, scan_results: &WifiScanResults) {
-    write!(writer, "HTTP/1.1 200 OK\r\n").ok();
+    write!(writer, "HTTP/1.0 200 OK\r\n").ok();
     write!(writer, "Content-Type: text/html; charset=utf-8\r\n").ok();
     write!(writer, "\r\n").ok();
     write!(
@@ -362,8 +375,8 @@ fn handle_home_page<W: core::fmt::Write>(writer: &mut W, scan_results: &WifiScan
         write!(
             writer,
             "<option value=\"{}\">{}</option>\r\n",
-            HtmlEscape::from_str(ssid),
-            HtmlEscape::from_str(ssid)
+            HtmlEscaper(ssid),
+            HtmlEscaper(ssid)
         )
         .ok();
     }
@@ -396,63 +409,46 @@ fn handle_home_page<W: core::fmt::Write>(writer: &mut W, scan_results: &WifiScan
     .ok();
 }
 
-fn handle_connect_post<R: genio::Read>(
+fn handle_connect_post<E, R: genio::Read<ReadError = nb::Error<E>>>(
+    uart: &mut dyn core::fmt::Write,
     reader: &mut R,
     ssid: &mut Option<heapless::String<U256>>,
     password: &mut Option<heapless::String<U32>>,
-) {
-    // Buffer big enough to get the HTTP form post body
-    let mut req = heapless::String::<U1024>::new();
+) -> Result<(), UrlEncodedParamsError<E>> {
+    let mut params = UrlEncodedParams::<_, _, U256, U32, U256>::from_reader(reader);
 
-    let mut buf = [0u8; 255];
-    while let Ok(len) = reader.read(&mut buf) {
-        req.push_str(core::str::from_utf8(&buf[..len]).unwrap())
-            .ok();
-    }
-
-    // The POST body is URL-encoded, so we split on &.
-    for param in req.split('&') {
-        let mut part_split = param.split('=');
-
-        let key = part_split.next();
-        let val = part_split.next();
-
-        if key == None || val == None {
-            continue;
-        }
-
-        let decoded_val = UriDecode::from_str(val.unwrap());
-
-        match key {
+    while let Some((name, value)) = block!(params.next())? {
+        match name.as_str() {
             // "ssid" is the select box, "other" is the input box
-            Some("ssid") | Some("other") => {
-                if val.unwrap().len() > 0 {
-                    ssid.replace(heapless::String::new());
-                    write!(ssid.as_mut().unwrap(), "{}", decoded_val).ok();
+            "ssid" | "other" => {
+                // "if" so we don’t overwrite "ssid" with a blank "other"
+                if value.len() > 0 {
+                    ssid.replace(value);
                 }
             }
-            Some("password") => {
-                password.replace(heapless::String::new());
-                write!(password.as_mut().unwrap(), "{}", decoded_val).ok();
+            "password" => {
+                password.replace(heapless::String::from(value.as_str()));
             }
             _ => {}
         }
     }
+
+    Ok(())
 }
 
 // impl<L> genio::ExtendFromReader for heapless::String<L> {}
 
 fn handle_redirect<W: core::fmt::Write>(writer: &mut W, location: &str) {
-    write!(writer, "HTTP/1.1 303 See Other\r\n").ok();
+    write!(writer, "HTTP/1.0 303 See Other\r\n").ok();
     write!(writer, "Location: {}\r\n", location).ok();
 }
 
 fn handle_not_found<W: core::fmt::Write>(writer: &mut W) {
-    write!(writer, "HTTP/1.1 404 Not Found\r\n").ok();
+    write!(writer, "HTTP/1.0 404 Not Found\r\n").ok();
 }
 
 fn handle_method_not_allowed<W: core::fmt::Write>(writer: &mut W) {
-    write!(writer, "HTTP/1.1 405 Method Not Allowed\r\n").ok();
+    write!(writer, "HTTP/1.0 405 Method Not Allowed\r\n").ok();
 }
 
 fn fetch_colors<W: core::fmt::Write>(
@@ -475,7 +471,7 @@ fn fetch_colors<W: core::fmt::Write>(
 
     // TODO(fiona): It would be nice to find a library to handle creating these
     // HTTP requests.
-    write!(&mut color_socket, "POST /api/ HTTP/1.1\r\n")?;
+    write!(&mut color_socket, "POST /api/ HTTP/1.0\r\n")?;
     write!(&mut color_socket, "Host: colormind.io\r\n")?;
     write!(&mut color_socket, "User-Agent: PyPortal\r\n")?;
     write!(&mut color_socket, "Accept: */*\r\n")?;

@@ -1,9 +1,12 @@
 use core::cmp::min;
+use core::convert::TryInto;
 use core::time::Duration;
 
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 use embedded_hal::spi::FullDuplex;
 
+use heapless::consts::*;
+use heapless::String;
 use nb::block;
 
 use crate::commands::*;
@@ -51,6 +54,64 @@ impl Into<u8> for WifiStatus {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum WifiEncryptionType {
+    /// Unencrypted
+    Open = 7,
+    /// WEP
+    Wep = 5,
+    /// WPA PSK
+    WpaPsk = 2,
+    /// WPA2 PSK or WPA/WPA2 PSK
+    Wpa2Psk = 4,
+
+    /// Unknown
+    Unknown = 255,
+}
+
+impl From<u8> for WifiEncryptionType {
+    fn from(s: u8) -> Self {
+        match s {
+            2 => WifiEncryptionType::WpaPsk,
+            4 => WifiEncryptionType::Wpa2Psk,
+            5 => WifiEncryptionType::Wep,
+            7 => WifiEncryptionType::Open,
+
+            _ => WifiEncryptionType::Unknown,
+        }
+    }
+}
+
+impl Into<u8> for WifiEncryptionType {
+    fn into(self) -> u8 {
+        self as u8
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum WifiPowerMode {
+    /// Corresponds to the ESP32’s `WIFI_PS_NONE`.
+    Full = 0,
+    /// Corresponds to the ESP32’s `WIFI_PS_MODEM`.
+    Low = 1,
+}
+
+impl Into<u8> for WifiPowerMode {
+    fn into(self) -> u8 {
+        self as u8
+    }
+}
+
+pub struct WifiScanResult {
+    ssid: heapless::String<U32>,
+    bssid: [u8; 6],
+    rssi: i8,
+    channel: u8,
+    encryption_type: WifiEncryptionType,
+}
+
 /// Result struct for scanning for SSIDs.
 ///
 /// Because the WiFiNINA chip has a fixed maximum of 10 networks, we can just
@@ -95,7 +156,7 @@ where
             spi,
             NinaCommand::GetConnectionStatus,
             Params::none(),
-            Params::of(&mut [RecvParam::Byte(&mut status)]),
+            Params::of(&mut [RecvParam::U8(&mut status)]),
         )?;
 
         Ok(status.into())
@@ -115,8 +176,8 @@ where
                 spi,
                 NinaCommand::SetNetworkAndPassphrase,
                 Params::of(&mut [
-                    SendParam::Bytes(&mut ssid.bytes()),
-                    SendParam::Bytes(&mut password.bytes()),
+                    SendParam::U8Array(ssid.as_bytes()),
+                    SendParam::U8Array(password.as_bytes()),
                 ]),
                 Params::of(&mut [RecvParam::Ack]),
             )?;
@@ -124,7 +185,7 @@ where
             self.send_and_receive(
                 spi,
                 NinaCommand::SetNetwork,
-                Params::of(&mut [SendParam::Bytes(&mut ssid.bytes())]),
+                Params::of(&mut [SendParam::U8Array(ssid.as_bytes())]),
                 Params::of(&mut [RecvParam::Ack]),
             )?;
         }
@@ -167,9 +228,9 @@ where
                 spi,
                 NinaCommand::SetApPassphrase,
                 Params::of(&mut [
-                    SendParam::Bytes(&mut name.bytes()),
-                    SendParam::Bytes(&mut password.bytes()),
-                    SendParam::Byte(channel),
+                    SendParam::U8Array(name.as_bytes()),
+                    SendParam::U8Array(password.as_bytes()),
+                    SendParam::U8(channel),
                 ]),
                 Params::of(&mut [RecvParam::Ack]),
             )?;
@@ -177,10 +238,7 @@ where
             self.send_and_receive(
                 spi,
                 NinaCommand::SetApNetwork,
-                Params::of(&mut [
-                    SendParam::Bytes(&mut name.bytes()),
-                    SendParam::Byte(channel),
-                ]),
+                Params::of(&mut [SendParam::U8Array(name.as_bytes()), SendParam::U8(channel)]),
                 Params::of(&mut [RecvParam::Ack]),
             )?;
         }
@@ -253,5 +311,81 @@ where
         Self::expect_byte(&mut spi, NinaCommand::End.into())?;
 
         Ok(ssids_count)
+    }
+
+    pub fn wifi_set_power_mode(
+        &mut self,
+        spi: &mut Spi,
+        mode: WifiPowerMode,
+    ) -> Result<(), Error<SpiError>> {
+        self.send_and_receive(
+            spi,
+            NinaCommand::SetPowerMode,
+            Params::of(&mut [SendParam::U8(mode.into())]),
+            Params::of(&mut [RecvParam::Ack]),
+        )?;
+
+        Ok(())
+    }
+
+    /// Gets the current SSID and saves it into the provided byte buffer.
+    ///
+    /// Returns the size of the SSID.
+    pub fn wifi_ssid(&mut self, spi: &mut Spi, ssid: &mut [u8]) -> Result<usize, Error<SpiError>> {
+        let mut name_len = 0usize;
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::GetCurrentSsid,
+            Params::none(),
+            Params::of(&mut [RecvParam::U8Buffer(ssid, &mut name_len)]),
+        )?;
+
+        Ok(name_len)
+    }
+
+    /// Gets the current BSSID.
+    pub fn wifi_bssid(&mut self, spi: &mut Spi) -> Result<[u8; 6], Error<SpiError>> {
+        let mut bssid = [0u8; 6];
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::GetCurrentBssid,
+            Params::none(),
+            Params::of(&mut [RecvParam::U8Array(&mut bssid)]),
+        )?;
+
+        Ok(bssid)
+    }
+
+    /// Gets the current signal strength.
+    pub fn wifi_rssi(&mut self, spi: &mut Spi) -> Result<i8, Error<SpiError>> {
+        let mut rssi = 0i32;
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::GetCurrentRssi,
+            Params::none(),
+            Params::of(&mut [RecvParam::I32LE(&mut rssi)]),
+        )?;
+
+        Ok(rssi.try_into().unwrap_or(0))
+    }
+
+    /// Gets the encryption type for the current Wi-Fi network.
+    pub fn wifi_encryption_type(
+        &mut self,
+        spi: &mut Spi,
+    ) -> Result<WifiEncryptionType, Error<SpiError>> {
+        let mut enc_type = 0u8;
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::GetCurrentEnct,
+            Params::none(),
+            Params::of(&mut [RecvParam::U8(&mut enc_type)]),
+        )?;
+
+        Ok(WifiEncryptionType::from(enc_type))
     }
 }

@@ -56,7 +56,7 @@ where
             spi,
             NinaCommand::GetSocket,
             Params::none(),
-            Params::of(&mut [RecvParam::Byte(&mut socket_num)]),
+            Params::of(&mut [RecvParam::U8(&mut socket_num)]),
         )?;
 
         if socket_num == 255 {
@@ -77,8 +77,8 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::GetClientStateTcp,
-            Params::of(&mut [SendParam::Byte(socket.num())]),
-            Params::of(&mut [RecvParam::Byte(&mut status)]),
+            Params::of(&mut [SendParam::U8(socket.num())]),
+            Params::of(&mut [RecvParam::U8(&mut status)]),
         )?;
 
         Ok(status.into())
@@ -99,7 +99,7 @@ where
 
         let ip = match destination {
             Destination::Ip(ip) => ip,
-            Destination::Hostname(name) => match self.resolve_host_name(spi, name)? {
+            Destination::Hostname(name) => match self.resolve_hostname(spi, name)? {
                 Some(ip) => ip,
                 // TODO(fiona): Should we use a different return value for a
                 // host name lookup failing?
@@ -111,12 +111,12 @@ where
             spi,
             NinaCommand::StartClientTcp,
             Params::of(&mut [
-                SendParam::Bytes(&mut ip.iter().cloned()),
-                SendParam::Word(port),
-                SendParam::Byte(socket.num()),
-                SendParam::Byte(protocol.into()),
+                SendParam::U8Array(&ip),
+                SendParam::U16(port),
+                SendParam::U8(socket.num()),
+                SendParam::U8(protocol.into()),
             ]),
-            Params::of(&mut [RecvParam::OptionalByte(&mut result)]),
+            Params::of(&mut [RecvParam::OptionalU8(&mut result)]),
         )?;
 
         // The WiFiNINA commands seem to indicate that it’s possible to send the
@@ -128,17 +128,17 @@ where
         // the chip, so we’re going to just move to that model.
         //
         // Unfortunately it is very unclear why this doesn’t work, as the code
-        // paths for resolve_host_name and the host name version of connect seem
+        // paths for resolve_hostname and the host name version of connect seem
         // almost identical, given the C headers.
         //
         // Destination::Hostname(name) => self.send_and_receive(spi,
         //     NinaCommand::StartClientTcp, Params::of(&mut
-        //     [SendParam::Bytes(&mut name.bytes()), // You still pass an IP for
-        //     the host name version, but it’s // ignored. SendParam::Bytes(&mut
-        //     [0, 0, 0, 0].iter().cloned()), SendParam::Word(port),
-        //     SendParam::Byte(socket.num()), SendParam::Byte(protocol.into()),
+        //     [SendParam::U8Array(&mut name.bytes()), // You still pass an IP for
+        //     the host name version, but it’s // ignored. SendParam::U8Array(&mut
+        //     [0, 0, 0, 0].iter().cloned()), SendParam::U16(port),
+        //     SendParam::U8(socket.num()), SendParam::U8(protocol.into()),
         //     ]),
-        //     Params::of(&mut [RecvParam::OptionalByte(&mut result)]),
+        //     Params::of(&mut [RecvParam::OptionalU8(&mut result)]),
         // )?,
 
         if result.is_none() {
@@ -176,7 +176,7 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::StopClientTcp,
-            Params::of(&mut [SendParam::Byte(socket.num())]),
+            Params::of(&mut [SendParam::U8(socket.num())]),
             Params::of(&mut [RecvParam::Ack]),
         )
     }
@@ -249,10 +249,10 @@ where
                 spi,
                 NinaCommand::StartServerTcp,
                 Params::of(&mut [
-                    SendParam::Bytes(&mut ip.iter().cloned()),
-                    SendParam::Word(port),
-                    SendParam::Byte(socket.num()),
-                    SendParam::Byte(protocol.into()),
+                    SendParam::U8Array(&ip),
+                    SendParam::U16(port),
+                    SendParam::U8(socket.num()),
+                    SendParam::U8(protocol.into()),
                 ]),
                 Params::of(&mut [RecvParam::Ack]),
             ),
@@ -260,9 +260,9 @@ where
                 spi,
                 NinaCommand::StartServerTcp,
                 Params::of(&mut [
-                    SendParam::Word(port),
-                    SendParam::Byte(socket.num()),
-                    SendParam::Byte(protocol.into()),
+                    SendParam::U16(port),
+                    SendParam::U8(socket.num()),
+                    SendParam::U8(protocol.into()),
                 ]),
                 Params::of(&mut [RecvParam::Ack]),
             ),
@@ -290,8 +290,8 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::AvailableDataTcp,
-            Params::of(&mut [SendParam::Byte(server_socket.num())]),
-            Params::of(&mut [RecvParam::LEWord(&mut socket_num)]),
+            Params::of(&mut [SendParam::U8(server_socket.num())]),
+            Params::of(&mut [RecvParam::U16LE(&mut socket_num)]),
         )
         .map_err(nb::Error::Other)?;
 
@@ -316,30 +316,30 @@ where
         &mut self,
         spi: &mut Spi,
         socket: &Socket<CsPin, Spi>,
-        bytes: &mut dyn ExactSizeIterator<Item = u8>,
+        mut bytes: &[u8],
     ) -> Result<usize, Error<SpiError>> {
         let mut bytes_written: usize = 0;
-        let mut bytes_left = bytes.len();
 
         // We can only write up to 4000 bytes at a time (MAX_WRITE_BYTES) so we
         // loop to write in 4000 byte chunks as necessary.
-        while bytes_left > 0 {
+        while !bytes.is_empty() {
             let mut bytes_just_written = 0u16;
 
             self.send_and_receive(
                 spi,
                 NinaCommand::SendDataTcp,
                 Params::with_16_bit_length(&mut [
-                    SendParam::Byte(socket.num()),
-                    SendParam::Bytes(&mut bytes.take(MAX_WRITE_BYTES)),
+                    SendParam::U8(socket.num()),
+                    SendParam::U8Array(&bytes[..core::cmp::min(MAX_WRITE_BYTES, bytes.len())]),
                 ]),
                 // Yes, this comes back in little-endian rather than in network order.
-                Params::of(&mut [RecvParam::LEWord(&mut bytes_just_written)]),
+                Params::of(&mut [RecvParam::U16LE(&mut bytes_just_written)]),
             )?;
 
             let bytes_just_written_usize: usize = bytes_just_written.into();
             bytes_written += bytes_just_written_usize;
-            bytes_left -= bytes_just_written_usize;
+
+            bytes = &bytes[bytes_just_written_usize..];
         }
 
         Ok(bytes_written)
@@ -372,8 +372,8 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::AvailableDataTcp,
-            Params::of(&mut [SendParam::Byte(socket.num())]),
-            Params::of(&mut [RecvParam::LEWord(&mut available)]),
+            Params::of(&mut [SendParam::U8(socket.num())]),
+            Params::of(&mut [RecvParam::U16LE(&mut available)]),
         )
         .map_err(nb::Error::Other)?;
 
@@ -391,10 +391,10 @@ where
             spi,
             NinaCommand::GetDatabufTcp,
             Params::with_16_bit_length(&mut [
-                SendParam::Byte(socket.num()),
-                SendParam::LEWord(read_limit),
+                SendParam::U8(socket.num()),
+                SendParam::U16LE(read_limit),
             ]),
-            Params::with_16_bit_length(&mut [RecvParam::Buffer(buf, &mut read_len)]),
+            Params::with_16_bit_length(&mut [RecvParam::U8Buffer(buf, &mut read_len)]),
         )
         .map_err(nb::Error::Other)?;
 
@@ -626,8 +626,7 @@ where
     pub fn write(&mut self, buf: &[u8]) -> Result<usize, Error<SE>> {
         let socket = self.socket.as_ref().ok_or(Error::SocketClosed)?;
 
-        self.wifi
-            .socket_write(self.spi, socket, &mut buf.iter().cloned())
+        self.wifi.socket_write(self.spi, socket, buf)
     }
 
     /// Returns the underlying [`Socket`](struct.Socket.html) value without

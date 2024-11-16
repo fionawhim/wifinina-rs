@@ -53,7 +53,7 @@ pub type ConnectedSocket<'wifi, 's, 'cd> =
 pub fn sys_tick(syst: pac::SYST, clocks: &mut GenericClockController) -> PollingSysTick {
     let clock_hertz: Hertz = clocks.gclk0().into();
 
-    // Feathre M4 does not have a built-in calibration defined, so we use the
+    // Feather M4 does not have a built-in calibration defined, so we use the
     // clock speed of the default clock, which matches the processor speed.
     let calibration = SysTickCalibration::from_clock_hz(clock_hertz.0);
 
@@ -76,7 +76,9 @@ pub fn spi(
     hal::spi_master(clocks, 8000000.hz(), sercom1, mclk, sck, mosi, miso, port)
 }
 
-/// Creates a `WifiNina` instance for the PyPortal’s internal ESP32.
+/// Creates a `WifiNina` instance for the AirLift’s ESP32.
+///
+/// The chip is accessible through the standard Feather SPI pins.
 pub fn wifi<'cd>(
     port: &mut gpio::Port,
     d11: gpio::Pa21<gpio::Input<gpio::Floating>>,
@@ -99,4 +101,23 @@ pub fn wifi<'cd>(
         )?,
         esp_reset,
     ))
+}
+
+/// Sets the onboard RGB LED on the AirLift FeatherWing.
+///
+/// The Airlift’s RGB LED is PWMable on pins 26, 25, and 27 of the ESP32.
+pub fn set_airlift_rgb<'a>(
+    wifi: &mut WifiNina<'a>,
+    spi: &mut Spi,
+    color: [u8; 3],
+) -> Result<(), Error> {
+    wifi.pin_set_mode(spi, 26, crate::ArduinoPinMode::Output)?;
+    wifi.pin_set_mode(spi, 25, crate::ArduinoPinMode::Output)?;
+    wifi.pin_set_mode(spi, 27, crate::ArduinoPinMode::Output)?;
+
+    wifi.pin_analog_write(spi, 26, color[0])?;
+    wifi.pin_analog_write(spi, 25, color[1])?;
+    wifi.pin_analog_write(spi, 27, color[2])?;
+
+    Ok(())
 }

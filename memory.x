@@ -1,3 +1,6 @@
+/* This is the memory layout for the Feather M4. It _also_ works for
+the PyPortal, because we can get by with less flash and RAM for these
+examples. */
 MEMORY
 {
   /* Leave 16k for the default bootloader on the Feather M4 */

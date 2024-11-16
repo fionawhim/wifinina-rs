@@ -32,6 +32,25 @@ impl Into<u8> for ArduinoPinMode {
     }
 }
 
+/// Constants for
+/// [`pin_analog_read`](struct.WifiNina.html#method.pin_analog_read).
+///
+/// Taken from the [esp-idf
+/// adc_types.h](https://github.com/espressif/esp-idf/blob/cf056a7d0b90261923b8207f21dc270313b67456/components/soc/include/hal/adc_types.h)
+/// file.
+pub enum EspAttenuation {
+    Db0 = 0,
+    Db2_5 = 1,
+    Db6 = 2,
+    Db11 = 3,
+}
+
+impl Into<u8> for EspAttenuation {
+    fn into(self) -> u8 {
+        self as u8
+    }
+}
+
 impl<CsPin, BusyPin, Spi, SpiError, CountDown, CountDownTime>
     WifiNina<CsPin, BusyPin, Spi, CountDown>
 where
@@ -54,7 +73,7 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::SetDebug,
-            Params::of(&mut [SendParam::Byte(enabled as u8)]),
+            Params::of(&mut [SendParam::U8(enabled as u8)]),
             Params::of(&mut [RecvParam::Ack]),
         )
     }
@@ -67,7 +86,7 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::GetTemperature,
-            Params::of(&mut []),
+            Params::none(),
             Params::of(&mut [RecvParam::Float(&mut temp)]),
         )?;
 
@@ -89,8 +108,8 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::GetFirmwareVersion,
-            Params::of(&mut []),
-            Params::of(&mut [RecvParam::Buffer(&mut buf, &mut size)]),
+            Params::none(),
+            Params::of(&mut [RecvParam::U8Buffer(&mut buf, &mut size)]),
         )?;
 
         Ok((buf, size))
@@ -109,7 +128,7 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::SetPinMode,
-            Params::of(&mut [SendParam::Byte(pin), SendParam::Byte(mode.into())]),
+            Params::of(&mut [SendParam::U8(pin), SendParam::U8(mode.into())]),
             Params::of(&mut [RecvParam::Ack]),
         )?;
 
@@ -125,7 +144,7 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::SetDigitalWrite,
-            Params::of(&mut [SendParam::Byte(pin), SendParam::Byte(value)]),
+            Params::of(&mut [SendParam::U8(pin), SendParam::U8(value)]),
             Params::of(&mut [RecvParam::Ack]),
         )?;
 
@@ -141,10 +160,50 @@ where
         self.send_and_receive(
             spi,
             NinaCommand::SetAnalogWrite,
-            Params::of(&mut [SendParam::Byte(pin), SendParam::Byte(value)]),
+            Params::of(&mut [SendParam::U8(pin), SendParam::U8(value)]),
             Params::of(&mut [RecvParam::Ack]),
         )?;
 
         Ok(())
+    }
+
+    /// Reads a digital value off of one of the ESP32’s pins.
+    ///
+    /// Not available in Adafruit firmware before v1.5.0.
+    pub fn pin_digital_read(&mut self, spi: &mut Spi, pin: u8) -> Result<u8, Error<SpiError>> {
+        let mut value: u8 = 0;
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::SetDigitalRead,
+            Params::of(&mut [SendParam::U8(pin)]),
+            Params::of(&mut [RecvParam::U8(&mut value)]),
+        )?;
+
+        Ok(value)
+    }
+
+    /// Reads an analog value off of one of the ESP32’s pins.
+    ///
+    /// See [ESP Analog To Digital
+    /// Sensor](https://esphome.io/components/sensor/adc.html) for more details.
+    ///
+    /// Not available in Adafruit firmware before v1.5.0.
+    pub fn pin_analog_read(
+        &mut self,
+        spi: &mut Spi,
+        pin: u8,
+        attenuation: EspAttenuation,
+    ) -> Result<i32, Error<SpiError>> {
+        let mut value: i32 = 0;
+
+        self.send_and_receive(
+            spi,
+            NinaCommand::SetAnalogRead,
+            Params::of(&mut [SendParam::U8(pin), SendParam::U8(attenuation.into())]),
+            Params::of(&mut [RecvParam::I32LE(&mut value)]),
+        )?;
+
+        Ok(value)
     }
 }
